@@ -1,4 +1,4 @@
-/* app.js v6.0 - The Non-Blocking Protocol */
+/* app.js v7.0 - The Non-Blocking Protocol with Advanced Link Analysis */
 (() => {
     // --- CACHE DOM ELEMENTS ---
     const campaignListContainer = document.getElementById('campaignList');
@@ -165,12 +165,30 @@
         if (linksData.length === 0) { summaryReportContainer.innerHTML = '<div class="alert alert-info">No backlinks in this campaign yet.</div>'; return; }
         const table = document.createElement('table');
         table.className = 'table table-bordered table-striped table-hover';
-        table.innerHTML = `<thead class="thead-light"><tr><th>Backlink URL</th><th>Status</th><th>Validation</th><th>Google Ping</th><th>Ping-o-Matic</th><th>Short URL</th></tr></thead><tbody>${linksData.map(item => {
+        table.innerHTML = `<thead class="thead-light"><tr><th>Backlink URL</th><th>Status</th><th>Validation</th><th>Link Type</th><th>Anchor Text</th><th>Ping-o-Matic</th><th>Short URL</th></tr></thead><tbody>${linksData.map(item => {
             let displayUrl = item.url; try { displayUrl = decodeURIComponent(item.url); } catch (e) {}
             const truncatedUrl = displayUrl.length > 50 ? `${displayUrl.substring(0, 47)}...` : displayUrl;
             const statusClass = item.live ? 'text-success' : 'text-danger';
             const statusText = item.live === undefined ? 'Unknown' : (item.live ? 'Live' : 'Dead');
-            return `<tr><td class="text-break" title="${displayUrl}">${truncatedUrl}</td><td class="text-center fw-bold ${statusClass}">${statusText}</td><td class="text-center">${item.validation || '⚪'}</td><td class="text-center">${item.google || '⚪'}</td><td class="text-center">${item.pingomatic || '⚪'}</td><td>${item.shortlink && item.shortlink.startsWith('http') ? `<a href="${item.shortlink}" target="_blank" rel="noopener noreferrer">${item.shortlink}</a>` : (item.shortlink || '⚪')}</td></tr>`;
+
+            let linkTypeBadge = '⚪';
+            if (item.linkType === 'Dofollow') {
+                linkTypeBadge = '<span class="badge bg-success">Dofollow</span>';
+            } else if (item.linkType === 'Nofollow') {
+                linkTypeBadge = '<span class="badge bg-warning text-dark">Nofollow</span>';
+            }
+
+            const truncatedAnchor = (item.anchorText || 'N/A').length > 30 ? `${(item.anchorText).substring(0, 27)}...` : (item.anchorText || 'N/A');
+
+            return `<tr>
+                        <td class="text-break" title="Page Title: ${item.pageTitle || 'N/A'}">${truncatedUrl}</td>
+                        <td class="text-center fw-bold ${statusClass}">${statusText}</td>
+                        <td class="text-center">${item.validation || '⚪'}</td>
+                        <td class="text-center">${linkTypeBadge}</td>
+                        <td title="${item.anchorText || 'N/A'}">${truncatedAnchor}</td>
+                        <td class="text-center">${item.pingomatic || '⚪'}</td>
+                        <td>${item.shortlink && item.shortlink.startsWith('http') ? `<a href="${item.shortlink}" target="_blank" rel="noopener noreferrer">${item.shortlink}</a>` : (item.shortlink || '⚪')}</td>
+                    </tr>`;
         }).join('')}</tbody>`;
         summaryReportContainer.innerHTML = '';
         summaryReportContainer.appendChild(table);
@@ -213,6 +231,9 @@
             logMessage(`--- Checking status of: ${link.url} ---`, 'info');
             const validationResult = await validateBacklink(link.url, campaign.targetDomain);
             link.live = validationResult.success;
+            link.pageTitle = validationResult.pageTitle;
+            link.anchorText = validationResult.anchorText;
+            link.linkType = validationResult.linkType;
             link.lastChecked = new Date().toISOString();
             logMessage(`Link is ${link.live ? 'Live' : 'Dead'}.`, link.live ? 'success' : 'error');
             updateProgress(index + 1, campaign.links.length);
@@ -227,12 +248,15 @@
     // --- WORKER & UTILITY FUNCTIONS ---
     async function amplifyUrl(url, targetDomain, activeModules) {
         logMessage(`--- Starting amplification for: ${url} ---`, 'info');
-        const summary = { url, validation: '⚪', google: '⚪', pingomatic: '⚪', shortlink: '⚪', live: undefined, lastAmplified: new Date().toISOString() };
+        const summary = { url, validation: '⚪', google: '⚪', pingomatic: '⚪', shortlink: '⚪', live: undefined, pageTitle: '⚪', anchorText: '⚪', linkType: '⚪', lastAmplified: new Date().toISOString() };
         await sleep(500);
         if (activeModules.validate) {
             const result = await validateBacklink(url, targetDomain);
             summary.live = result.success;
             summary.validation = result.success ? '✅' : '❌';
+            summary.pageTitle = result.pageTitle;
+            summary.anchorText = result.anchorText;
+            summary.linkType = result.linkType;
             logMessage(result.success ? 'Backlink validated successfully.' : `Validation failed: ${result.error}`, result.success ? 'success' : 'error');
             if (!result.success) { logMessage(`--- Halting signals for ${url} due to validation failure. ---`, 'warning'); return summary; }
             await sleep(500);
@@ -265,10 +289,32 @@
             const response = await fetch(proxyUrl);
             if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
             const html = await response.text();
+
+            const titleMatch = html.match(/<title>(.*?)<\/title>/i);
+            const pageTitle = titleMatch ? titleMatch[1].trim() : 'No Title Found';
+
             const linkRegex = new RegExp(`href\\s*=\\s*["'](https?:\\/\\/)?(www\\.)?${targetDomain.replace(/\./g, '\\.')}`, 'i');
-            return { success: linkRegex.test(html), error: linkRegex.test(html) ? null : `Link to ${targetDomain} not found.` };
+            if (!linkRegex.test(html)) {
+                return { success: false, error: `Link to ${targetDomain} not found.`, pageTitle: 'N/A', anchorText: 'N/A', linkType: 'N/A' };
+            }
+
+            const linkElementRegex = new RegExp(`<a[^>]*href\\s*=\\s*["'][^"']*${targetDomain.replace(/\./g, '\\.')}[^"']*["'][^>]*>.*?<\\/a>`, 'i');
+            const linkElementMatch = html.match(linkElementRegex);
+
+            if (linkElementMatch) {
+                const fullTag = linkElementMatch[0];
+                const anchorTextContent = fullTag.replace(/<[^>]+>/g, '').trim();
+                const anchorText = anchorTextContent === '' ? '(Empty Anchor)' : anchorTextContent;
+                const isNofollow = /rel\s*=\s*["']?[^>]*nofollow/i.test(fullTag);
+                const linkType = isNofollow ? 'Nofollow' : 'Dofollow';
+                return { success: true, error: null, pageTitle, anchorText, linkType };
+            }
+            
+            // Fallback if regex for full element fails, but href was found
+            return { success: true, error: null, pageTitle, anchorText: 'N/A', linkType: 'N/A' };
+
         } catch (error) {
-            return { success: false, error: `Failed to fetch. ${error.message}` };
+            return { success: false, error: `Failed to fetch. ${error.message}`, pageTitle: 'N/A', anchorText: 'N/A', linkType: 'N/A' };
         }
     }
 
