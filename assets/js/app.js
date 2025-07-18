@@ -85,7 +85,7 @@ function initializeGoogleClient() {
     try {
         googleTokenClient = google.accounts.oauth2.initTokenClient({
             client_id: GOOGLE_CLIENT_ID,
-            scope: 'https://www.googleapis.com/auth/indexing',
+            scope: 'https://www.googleapis.com/auth/indexing email',
             callback: handleGoogleCredentialResponse,
         });
     } catch (error) {
