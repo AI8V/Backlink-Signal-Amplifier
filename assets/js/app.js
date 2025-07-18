@@ -31,8 +31,8 @@
     };
 
     // --- CONFIGURATION ---
-    const CLOUD_PING_PROXY = 'https://ping-proxy.ai8v-dev.workers.dev/';
-    const CLOUD_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+    const CLOUD_PING_PROXY = 'https://google-ping-proxy.amr-omar304.workers.dev/';
+    const CLOUD_CORS_PROXY = 'https://throbbing-dew-da3c.amr-omar304.workers.dev/?url=';
     const LOCAL_STORAGE_KEY_CAMPAIGNS = 'amplifier_campaigns_v6';
     const LOCAL_STORAGE_KEY_SETTINGS = 'amplifier_settings_v6';
 
