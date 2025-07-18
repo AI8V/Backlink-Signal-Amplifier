@@ -55,3 +55,7 @@ body {
   border: 1px solid var(--bs-border-color);
 }
 
+.list-group-item-action {
+  cursor: default;
+}
+
