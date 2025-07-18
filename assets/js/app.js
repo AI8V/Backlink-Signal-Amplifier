@@ -39,7 +39,7 @@ let googleTokenClient;
 let googleAccessToken = null;
 
 // --- CONFIGURATION ---
-const GOOGLE_CLIENT_ID = '108483840997-k66p7fm5oga3s1gotmmuaeg9opsh6nv2.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = '229845739113-s91ticoetj6krrj6s8gvjtijgpe6q03r.apps.googleusercontent.com';
 const CLOUD_CORS_PROXY = 'https://throbbing-dew-da3c.amr-omar304.workers.dev/?url=';
 const LOCAL_STORAGE_KEY_CAMPAIGNS = 'amplifier_campaigns_v6';
 const LOCAL_STORAGE_KEY_SETTINGS = 'amplifier_settings_v6';
