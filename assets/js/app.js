@@ -18,20 +18,28 @@ const progressContainer = document.getElementById('progress-container');
 const progressBar = document.getElementById('progress-bar');
 const progressText = document.getElementById('progress-text');
 const moduleSwitches = {
-validate: document.getElementById('moduleValidate'),
-googlePing: document.getElementById('moduleGooglePing'),
-pingServices: document.getElementById('modulePingServices'),
-shortUrl: document.getElementById('moduleShortUrl')
+    validate: document.getElementById('moduleValidate'),
+    googlePing: document.getElementById('moduleGooglePing'),
+    pingServices: document.getElementById('modulePingServices'),
+    shortUrl: document.getElementById('moduleShortUrl')
 };
+const googleAuthBtn = document.getElementById('googleAuthBtn');
+const googleSignOutBtn = document.getElementById('googleSignOutBtn');
+const googleAuthStatus = document.getElementById('googleAuthStatus');
+const googleSignOutStatus = document.getElementById('googleSignOutStatus');
+const googleUserEmail = document.getElementById('googleUserEmail');
+
 // --- STATE MANAGEMENT ---
 let campaigns = {};
 let activeCampaignId = null;
-let settings = {
-    operationMode: 'standard' // Default to standard mode
+let settings = { 
+    operationMode: 'standard' 
 };
+let googleTokenClient;
+let googleAccessToken = null;
 
 // --- CONFIGURATION ---
-const CLOUD_PING_PROXY = 'https://google-ping-proxy.amr-omar304.workers.dev/';
+const GOOGLE_CLIENT_ID = '108483840997-k66p7fm5oga3s1gotmmuaeg9opsh6nv2.apps.googleusercontent.com';
 const CLOUD_CORS_PROXY = 'https://throbbing-dew-da3c.amr-omar304.workers.dev/?url=';
 const LOCAL_STORAGE_KEY_CAMPAIGNS = 'amplifier_campaigns_v6';
 const LOCAL_STORAGE_KEY_SETTINGS = 'amplifier_settings_v6';
@@ -42,6 +50,16 @@ function init() {
     loadCampaigns();
     renderCampaignList();
     setupEventListeners();
+    
+    // **IMPROVEMENT**: Check if the google object is available before initializing
+    if (window.google) {
+        initializeGoogleClient();
+    } else {
+        console.error("Google Identity Services script not loaded. Auth button will be disabled.");
+        googleAuthBtn.disabled = true;
+        const authStatusP = document.querySelector('#googleAuthStatus p');
+        if(authStatusP) authStatusP.textContent = "Could not load Google authentication service. Please check your internet connection and refresh the page.";
+    }
 }
 
 function setupEventListeners() {
@@ -58,31 +76,77 @@ function setupEventListeners() {
             saveCampaigns();
         }
     });
+    googleAuthBtn.addEventListener('click', handleGoogleAuth);
+    googleSignOutBtn.addEventListener('click', handleGoogleSignOut);
 }
 
-// --- SETTINGS (Privacy Switch) ---
+// --- CORE OAuth & GIS LOGIC ---
+function initializeGoogleClient() {
+    try {
+        googleTokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: GOOGLE_CLIENT_ID,
+            scope: 'https://www.googleapis.com/auth/indexing',
+            callback: handleGoogleCredentialResponse,
+        });
+    } catch (error) {
+        console.error("Failed to initialize Google Token Client:", error);
+        googleAuthBtn.disabled = true;
+    }
+}
+
+function handleGoogleAuth() {
+    if (googleTokenClient) {
+        googleTokenClient.requestAccessToken();
+    } else {
+        showToast("Google client is not initialized.", "danger");
+    }
+}
+
+function handleGoogleSignOut() {
+    googleAccessToken = null;
+    googleAuthStatus.style.display = 'block';
+    googleSignOutStatus.style.display = 'none';
+    moduleSwitches.googlePing.disabled = true;
+    moduleSwitches.googlePing.checked = false;
+    showToast('Disconnected from Google.', 'info');
+}
+
+function handleGoogleCredentialResponse(response) {
+    if (response.error) {
+        logMessage(`Google Auth Error: ${response.error}`, 'error');
+        showToast('Google authentication failed.', 'danger');
+        return;
+    }
+    googleAccessToken = response.access_token;
+    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+    })
+    .then(res => res.json())
+    .then(data => {
+        googleUserEmail.textContent = data.email;
+        googleAuthStatus.style.display = 'none';
+        googleSignOutStatus.style.display = 'block';
+        moduleSwitches.googlePing.disabled = false;
+        showToast('Successfully connected to Google.', 'success');
+    })
+    .catch(err => {
+        console.error("Failed to fetch user info:", err);
+        showToast('Could not verify Google connection.', 'danger');
+    });
+}
+
+
+// --- LEGACY SETTINGS (Kept for Modal functionality) ---
 function loadSettings() {
     const savedSettings = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY_SETTINGS));
-    if (savedSettings && (savedSettings.operationMode === 'standard' || savedSettings.operationMode === 'privacy')) {
+    if (savedSettings) {
         settings = savedSettings;
     }
-    document.querySelector(`input[name="operationMode"][value="${settings.operationMode}"]`).checked = true;
 }
 
 function saveAndApplySettings() {
-    const selectedMode = document.querySelector('input[name="operationMode"]:checked').value;
-    settings.operationMode = selectedMode;
-    localStorage.setItem(LOCAL_STORAGE_KEY_SETTINGS, JSON.stringify(settings));
-    showToast(`Settings saved. Mode: ${selectedMode}`, 'success');
     bootstrap.Modal.getInstance(document.getElementById('settingsModal')).hide();
-}
-
-function getProxy(endpoint) {
-    if (settings.operationMode === 'privacy') {
-        return CLOUD_CORS_PROXY;
-    } else {
-        return endpoint === 'ping' ? CLOUD_PING_PROXY : CLOUD_CORS_PROXY;
-    }
+    showToast('Settings saved.', 'success');
 }
 
 // --- CAMPAIGN MANAGEMENT ---
@@ -174,7 +238,7 @@ function generateSummaryReport(linksData = [], targetDomain = '') {
     exportCsvBtn.style.display = 'block';
     const table = document.createElement('table');
     table.className = 'table table-bordered table-striped table-hover';
-    table.innerHTML = `<thead class="thead-light"><tr><th>Backlink URL</th><th>Status</th><th>Validation</th><th>Link Type</th><th>Anchor Text</th><th>Ping-o-Matic</th><th>Short URL</th></tr></thead><tbody>${linksData.map(item => {
+    table.innerHTML = `<thead class="thead-light"><tr><th>Backlink URL</th><th>Status</th><th>Validation</th><th>Link Type</th><th>Anchor Text</th><th>Google Status</th><th>Short URL</th></tr></thead><tbody>${linksData.map(item => {
         let displayUrl = item.url; try { displayUrl = decodeURIComponent(item.url); } catch (e) {}
         const truncatedUrl = displayUrl.length > 50 ? `${displayUrl.substring(0, 47)}...` : displayUrl;
         const statusClass = item.live ? 'text-success' : 'text-danger';
@@ -188,20 +252,21 @@ function generateSummaryReport(linksData = [], targetDomain = '') {
         }
 
         const truncatedAnchor = (item.anchorText || 'N/A').length > 30 ? `${(item.anchorText).substring(0, 27)}...` : (item.anchorText || 'N/A');
-
+        
         return `<tr>
                     <td class="text-break" title="Page Title: ${item.pageTitle || 'N/A'}">${truncatedUrl}</td>
                     <td class="text-center fw-bold ${statusClass}">${statusText}</td>
                     <td class="text-center">${item.validation || '⚪'}</td>
                     <td class="text-center">${linkTypeBadge}</td>
                     <td title="${item.anchorText || 'N/A'}">${truncatedAnchor}</td>
-                    <td class="text-center">${item.pingomatic || '⚪'}</td>
+                    <td class="text-center">${item.google || '⚪'}</td> 
                     <td>${item.shortlink && item.shortlink.startsWith('http') ? `<a href="${item.shortlink}" target="_blank" rel="noopener noreferrer">${item.shortlink}</a>` : (item.shortlink || '⚪')}</td>
                 </tr>`;
     }).join('')}</tbody>`;
     summaryReportContainer.innerHTML = '';
     summaryReportContainer.appendChild(table);
 }
+
 
 // --- CORE PROCESSES ---
 async function startAmplificationProcess() {
@@ -271,9 +336,9 @@ async function amplifyUrl(url, targetDomain, activeModules) {
         await sleep(500);
     }
     if (activeModules.googlePing) {
-        const result = await pingGoogleSitemap(url);
+        const result = await submitToGoogleIndexingAPI(url);
         summary.google = result.success ? '✅' : '❌';
-        logMessage(result.success ? 'Google ping successful.' : `Google ping failed: ${result.error}`, result.success ? 'success' : 'error');
+        logMessage(result.success ? 'Google submission accepted.' : `Google submission failed: ${result.error}`, result.success ? 'success' : 'error');
         await sleep(500);
     }
     if (activeModules.pingServices) {
@@ -293,7 +358,7 @@ async function amplifyUrl(url, targetDomain, activeModules) {
 
 async function validateBacklink(url, targetDomain) {
     logMessage(`Validating: ${url}...`);
-    const proxyUrl = getProxy('cors') + encodeURIComponent(url);
+    const proxyUrl = CLOUD_CORS_PROXY + encodeURIComponent(url);
     try {
         const response = await fetch(proxyUrl);
         if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
@@ -319,7 +384,6 @@ async function validateBacklink(url, targetDomain) {
             return { success: true, error: null, pageTitle, anchorText, linkType };
         }
         
-        // Fallback if regex for full element fails, but href was found
         return { success: true, error: null, pageTitle, anchorText: 'N/A', linkType: 'N/A' };
 
     } catch (error) {
@@ -327,25 +391,45 @@ async function validateBacklink(url, targetDomain) {
     }
 }
 
-async function pingGoogleSitemap(url) {
-    logMessage(`Pinging Google for: ${url}...`);
-    if (settings.operationMode === 'privacy') {
-        return { success: false, error: 'Google Ping is unavailable in Enhanced Privacy Mode.' };
+async function submitToGoogleIndexingAPI(url) {
+    logMessage(`Submitting to Google Indexing API: ${url}...`);
+    if (!googleAccessToken) {
+        return { success: false, error: 'User is not authenticated with Google.' };
     }
-    const pingUrl = getProxy('ping') + `?url=${encodeURIComponent(url)}`;
+
+    const endpoint = 'https://indexing.googleapis.com/v3/urlNotifications:publish';
+    
     try {
-        const response = await fetch(pingUrl);
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${googleAccessToken}`
+            },
+            body: JSON.stringify({
+                url: url,
+                type: 'URL_UPDATED'
+            })
+        });
+
         const data = await response.json();
-        return { success: response.ok && data.success, error: data.error || `Ping worker returned HTTP ${response.status}` };
+
+        if (!response.ok) {
+            const errorMsg = data.error?.message || `HTTP error! Status: ${response.status}`;
+            throw new Error(errorMsg);
+        }
+        
+        return { success: true, data: data };
+
     } catch (error) {
-        return { success: false, error: `Could not reach ping worker. Error: ${error.message}` };
+        return { success: false, error: error.message };
     }
 }
 
 async function submitToPingOMatic(url) {
     logMessage(`Submitting to Ping-o-Matic: ${url}...`);
     const pingOMaticUrl = `http://pingomatic.com/ping/?title=New_Content_Update&blogurl=${encodeURIComponent(url)}&rssurl=${encodeURIComponent(url)}&chk_weblogscom=on`;
-    const proxyUrl = getProxy('cors') + encodeURIComponent(pingOMaticUrl);
+    const proxyUrl = CLOUD_CORS_PROXY + encodeURIComponent(pingOMaticUrl);
     try {
         const response = await fetch(proxyUrl);
         if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
@@ -379,7 +463,7 @@ function exportCampaignToCSV() {
     const sanitizeCell = (cellData) => {
         if (cellData == null) return '';
         let str = String(cellData);
-        str = str.replace(/"/g, '""'); // Escape double quotes
+        str = str.replace(/"/g, '""'); 
         if (str.includes(',') || str.includes('\n') || str.includes('"')) {
             str = `"${str}"`;
         }
@@ -388,7 +472,7 @@ function exportCampaignToCSV() {
 
     const headers = [
         "Backlink URL", "Status", "Validation", "Link Type", "Anchor Text", 
-        "Page Title", "Ping-o-Matic", "Short URL", "Last Checked"
+        "Page Title", "Google Status", "Short URL", "Last Checked"
     ];
     
     const rows = campaign.links.map(link => [
@@ -398,7 +482,7 @@ function exportCampaignToCSV() {
         sanitizeCell(link.linkType),
         sanitizeCell(link.anchorText),
         sanitizeCell(link.pageTitle),
-        sanitizeCell(link.pingomatic),
+        sanitizeCell(link.google),
         sanitizeCell(link.shortlink),
         sanitizeCell(link.lastChecked ? new Date(link.lastChecked).toLocaleString() : 'N/A')
     ].join(','));
@@ -463,5 +547,8 @@ return Object.keys(moduleSwitches).reduce((acc, key) => { acc[key] = moduleSwitc
 }
 return { cleanAndDecodeUrls, sleep, logMessage, updateProgress, setControlsState, getActiveModules };
 })();
+
+// Call the main initialization function.
+// With the 'defer' attribute on the script tag, the DOM will be ready.
 init();
 })();
