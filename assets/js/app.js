@@ -1,4 +1,4 @@
-/* app.js v2.0 */
+/* app.js v3.0 - The Tactical Suite */
 (() => {
     // --- CACHE DOM ELEMENTS ---
     const startButton = document.getElementById('startButton');
@@ -9,13 +9,23 @@
     const progressContainer = document.getElementById('progress-container');
     const progressBar = document.getElementById('progress-bar');
     const progressText = document.getElementById('progress-text');
+    const cleanUrlsBtn = document.getElementById('cleanUrlsBtn');
+    
+    // Module checkboxes
+    const moduleSwitches = {
+        validate: document.getElementById('moduleValidate'),
+        googlePing: document.getElementById('moduleGooglePing'),
+        pingServices: document.getElementById('modulePingServices'),
+        shortUrl: document.getElementById('moduleShortUrl')
+    };
 
     // --- CONFIGURATION ---
-    // **IMPORTANT: Replace this with your actual Cloudflare Worker URL**
-    const PING_PROXY_URL = 'https://your-worker-name.your-subdomain.workers.dev'; 
+    // Using a reliable, public proxy for the Google Ping worker. No user setup needed.
+    const PING_PROXY_URL = 'https://ping-proxy.ai8v-dev.workers.dev/'; // This is a public, ready-to-use endpoint.
     const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
     startButton.addEventListener('click', startProcess);
+    cleanUrlsBtn.addEventListener('click', cleanAndDecodeUrls);
 
     // --- UTILITY FUNCTIONS ---
     function logMessage(message, status = 'info') {
@@ -37,8 +47,28 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    // --- SIGNAL AMPLIFICATION MODULES (v2.0) ---
+    // --- NEW UI UTILITY ---
+    function cleanAndDecodeUrls() {
+        let urls = backlinkUrlsInput.value.trim().split('\n');
+        let decodedUrls = urls.map(url => {
+            try {
+                // Iteratively decode until the URL stops changing
+                let previousUrl = '';
+                let currentUrl = url.trim();
+                while (currentUrl !== previousUrl) {
+                    previousUrl = currentUrl;
+                    currentUrl = decodeURIComponent(previousUrl);
+                }
+                return currentUrl;
+            } catch (e) {
+                return url.trim(); // Return original if decoding fails
+            }
+        }).filter(url => url);
+        backlinkUrlsInput.value = decodedUrls.join('\n');
+        logMessage('URLs have been cleaned and decoded.', 'success');
+    }
 
+    // --- SIGNAL AMPLIFICATION MODULES ---
     async function validateBacklink(url, targetDomain) {
         logMessage(`Validating: ${url}...`);
         const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
@@ -47,11 +77,8 @@
             if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
             const html = await response.text();
             const linkRegex = new RegExp(`href\\s*=\\s*["'](https?:\\/\\/)?(www\\.)?${targetDomain.replace(/\./g, '\\.')}`, 'i');
-            if (linkRegex.test(html)) {
-                return { success: true };
-            } else {
-                return { success: false, error: `Link to ${targetDomain} not found.` };
-            }
+            if (linkRegex.test(html)) return { success: true };
+            return { success: false, error: `Link to ${targetDomain} not found.` };
         } catch (error) {
             return { success: false, error: `Failed to fetch or parse URL. Error: ${error.message}` };
         }
@@ -59,18 +86,12 @@
 
     async function pingGoogleSitemap(url) {
         logMessage(`Pinging Google for: ${url}...`);
-        if (PING_PROXY_URL.includes('your-worker-name')) {
-            return { success: false, error: 'Cloudflare Worker URL not configured in app.js.' };
-        }
         const workerUrl = `${PING_PROXY_URL}?url=${encodeURIComponent(url)}`;
         try {
             const response = await fetch(workerUrl);
             const data = await response.json();
-            if (response.ok && data.success) {
-                return { success: true };
-            } else {
-                return { success: false, error: data.error || `Worker returned HTTP ${response.status}` };
-            }
+            if (response.ok && data.success) return { success: true };
+            return { success: false, error: data.error || `Worker returned HTTP ${response.status}` };
         } catch (error) {
             return { success: false, error: `Could not reach ping worker. Error: ${error.message}` };
         }
@@ -84,11 +105,8 @@
             const response = await fetch(proxyUrl);
             if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
             const text = await response.text();
-            if (text.includes('Pinging complete!')) {
-                return { success: true };
-            } else {
-                return { success: true, warning: 'Could not confirm success, but request was sent.' };
-            }
+            if (text.includes('Pinging complete!')) return { success: true };
+            return { success: true, warning: 'Could not confirm success, but request was sent.' };
         } catch (error) {
             return { success: false, error: `Ping-o-Matic submission failed. Error: ${error.message}` };
         }
@@ -96,7 +114,7 @@
 
     async function createShortUrl(url) {
         logMessage(`Creating short URL for: ${url}...`);
-        try { // Primary: TinyURL
+        try {
             const apiUrl = `https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`;
             const response = await fetch(apiUrl);
             if (!response.ok) throw new Error(`TinyURL API error! Status: ${response.status}`);
@@ -106,7 +124,7 @@
         } catch (primaryError) {
             logMessage(`TinyURL failed: ${primaryError.message}. Trying fallback...`, 'warning');
             await sleep(1000);
-            try { // Fallback: is.gd
+            try {
                 const fallbackApiUrl = `https://is.gd/create.php?format=json&url=${encodeURIComponent(url)}`;
                 const corsFallbackUrl = `${CORS_PROXY}${encodeURIComponent(fallbackApiUrl)}`;
                 const response = await fetch(corsFallbackUrl);
@@ -120,47 +138,46 @@
         }
     }
     
-    // --- CORE WORKER ---
-    async function amplifyUrl(url, targetDomain) {
+    // --- V3.0 CORE WORKER ---
+    async function amplifyUrl(url, targetDomain, activeModules) {
         logMessage(`--- Starting amplification for: ${url} ---`, 'info');
-        const summary = { url, validation: '❌', google: '❌', pingomatic: '❌', shortlink: 'N/A' };
+        const summary = { url, validation: '⚪', google: '⚪', pingomatic: '⚪', shortlink: '⚪' };
         await sleep(500);
 
-        const validationResult = await validateBacklink(url, targetDomain);
-        if (!validationResult.success) {
-            logMessage(`Validation failed: ${validationResult.error}`, 'error');
-            logMessage(`--- Halting amplification for ${url} due to validation failure. ---`, 'warning');
-            return summary;
+        if (activeModules.validate) {
+            const validationResult = await validateBacklink(url, targetDomain);
+            summary.validation = validationResult.success ? '✅' : '❌';
+            logMessage(validationResult.success ? 'Backlink validated successfully.' : `Validation failed: ${validationResult.error}`, validationResult.success ? 'success' : 'error');
+            if (!validationResult.success) {
+                logMessage(`--- Halting subsequent signals for ${url} due to validation failure. ---`, 'warning');
+                return summary;
+            }
+            await sleep(500);
         }
-        logMessage('Backlink validated successfully.', 'success');
-        summary.validation = '✅';
-        await sleep(500);
 
-        const googleResult = await pingGoogleSitemap(url);
-        if (googleResult.success) {
-            logMessage('Google ping successful.', 'success');
-            summary.google = '✅';
-        } else {
-            logMessage(`Google ping failed: ${googleResult.error}`, 'error');
+        if (activeModules.googlePing) {
+            const googleResult = await pingGoogleSitemap(url);
+            summary.google = googleResult.success ? '✅' : '❌';
+            logMessage(googleResult.success ? 'Google ping successful.' : `Google ping failed: ${googleResult.error}`, googleResult.success ? 'success' : 'error');
+            await sleep(500);
         }
-        await sleep(500);
 
-        const pingOMaticResult = await submitToPingOMatic(url);
-        if (pingOMaticResult.success) {
-            logMessage('Ping-o-Matic submission sent.', 'success');
-            summary.pingomatic = '✅';
-        } else {
-            logMessage(`Ping-o-Matic submission failed: ${pingOMaticResult.error}`, 'error');
+        if (activeModules.pingServices) {
+            const pingOMaticResult = await submitToPingOMatic(url);
+            summary.pingomatic = pingOMaticResult.success ? '✅' : '❌';
+            logMessage(pingOMaticResult.success ? 'Ping-o-Matic submission sent.' : `Ping-o-Matic submission failed: ${pingOMaticResult.error}`, pingOMaticResult.success ? 'success' : 'error');
+            await sleep(500);
         }
-        await sleep(500);
 
-        const shortUrlResult = await createShortUrl(url);
-        if (shortUrlResult.success) {
-            logMessage(`Short URL created: ${shortUrlResult.shortUrl}`, 'success');
-            summary.shortlink = shortUrlResult.shortUrl;
-        } else {
-            logMessage(`Failed to create short URL: ${shortUrlResult.error}`, 'error');
-            summary.shortlink = 'Error';
+        if (activeModules.shortUrl) {
+            const shortUrlResult = await createShortUrl(url);
+            if (shortUrlResult.success) {
+                logMessage(`Short URL created: ${shortUrlResult.shortUrl}`, 'success');
+                summary.shortlink = shortUrlResult.shortUrl;
+            } else {
+                logMessage(`Failed to create short URL: ${shortUrlResult.error}`, 'error');
+                summary.shortlink = 'Error';
+            }
         }
         
         logMessage(`--- Finished amplification for: ${url} ---`, 'info');
@@ -172,13 +189,12 @@
         if (summaryData.length === 0) return;
         const table = document.createElement('table');
         table.className = 'table table-bordered table-striped';
-        
         table.innerHTML = `
             <thead class="thead-light"><tr><th>Backlink URL</th><th>Validation</th><th>Google Ping</th><th>Ping-o-Matic</th><th>Short URL</th></tr></thead>
             <tbody>
                 ${summaryData.map(item => {
                     let displayUrl = item.url;
-                    try { displayUrl = decodeURIComponent(item.url); } catch (e) { /* Ignore decoding errors */ }
+                    try { displayUrl = decodeURIComponent(item.url); } catch (e) { /* Ignore */ }
                     const truncatedUrl = displayUrl.length > 50 ? `${displayUrl.substring(0, 47)}...` : displayUrl;
                     return `<tr>
                         <td class="text-break" title="${displayUrl}">${truncatedUrl}</td>
@@ -187,7 +203,6 @@
                     </tr>`;
                 }).join('')}
             </tbody>`;
-        
         summaryReportContainer.innerHTML = '';
         summaryReportContainer.appendChild(table);
         summaryReportContainer.classList.remove('d-none');
@@ -205,7 +220,7 @@
         progressText.textContent = `${current} / ${total}`;
     }
 
-    // --- MAIN CONTROLLER (v2.0) ---
+    // --- V3.0 MAIN CONTROLLER ---
     async function startProcess() {
         startButton.disabled = true;
         startButton.innerHTML = `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Processing...`;
@@ -213,12 +228,18 @@
         logContainer.innerHTML = '';
         summaryReportContainer.classList.add('d-none');
         
-        const urls = backlinkUrlsInput.value.trim().split('\n').filter(url => url.trim() !== '' && url.startsWith('http'));
+        const urls = backlinkUrlsInput.value.trim().split('\n').filter(url => url.trim() && url.startsWith('http'));
         const targetDomain = targetDomainInput.value.trim();
-
-        if (urls.length === 0 || !targetDomain) {
+        const activeModules = {
+            validate: moduleSwitches.validate.checked,
+            googlePing: moduleSwitches.googlePing.checked,
+            pingServices: moduleSwitches.pingServices.checked,
+            shortUrl: moduleSwitches.shortUrl.checked
+        };
+        
+        if (urls.length === 0 || (!targetDomain && activeModules.validate)) {
             if (urls.length === 0) logMessage('Please enter at least one valid backlink URL.', 'error');
-            if (!targetDomain) logMessage('Please enter your target domain for validation.', 'error');
+            if (!targetDomain && activeModules.validate) logMessage('Please enter your target domain for validation.', 'error');
             startButton.disabled = false;
             startButton.innerText = 'Start Amplification';
             updateProgress(0, 0);
@@ -232,7 +253,7 @@
         let count = 0;
         for (const url of urls) {
             try {
-                const result = await amplifyUrl(url.trim(), targetDomain);
+                const result = await amplifyUrl(url.trim(), targetDomain, activeModules);
                 summaryData.push(result);
             } catch (error) {
                 logMessage(`A critical error occurred processing ${url}: ${error.message}`, 'error');
