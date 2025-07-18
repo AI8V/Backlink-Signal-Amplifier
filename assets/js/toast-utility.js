@@ -23,11 +23,11 @@ function showToast(message, type = 'info') {
 
     const toastHtml = `
         <div id="${toastId}" class="toast align-items-center ${toastClass} border-0" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="d-flex">
-                <div class="toast-body">${iconHtml}${message}</div>
-                <button type="button" class="btn-close btn-close-white ms-auto me-2" data-bs-dismiss="toast" aria-label="Close"></button>
-            </div>
-        </div>`;
+        <div class="d-flex align-items-center">
+            <div class="toast-body">${iconHtml}${message}</div>
+            <button type="button" class="btn-close btn-close-white ms-auto me-2" data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>
+    </div>`;
     toastContainer.insertAdjacentHTML('beforeend', toastHtml);
 
     const toastElement = document.getElementById(toastId);
