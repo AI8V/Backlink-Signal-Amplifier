@@ -1,4 +1,4 @@
-/* app.js v7.1 - The Non-Blocking Protocol with Advanced Link Analysis & CSV Export */
+/* app.js v7.2 - The Non-Blocking Protocol with Advanced Link Analysis & CSV Export */
 (() => {
 // --- CACHE DOM ELEMENTS ---
 const campaignListContainer = document.getElementById('campaignList');
@@ -238,7 +238,7 @@ function generateSummaryReport(linksData = [], targetDomain = '') {
     exportCsvBtn.style.display = 'block';
     const table = document.createElement('table');
     table.className = 'table table-bordered table-striped table-hover';
-    table.innerHTML = `<thead class="thead-light"><tr><th>Backlink URL</th><th>Status</th><th>Validation</th><th>Link Type</th><th>Anchor Text</th><th>Google Status</th><th>Short URL</th></tr></thead><tbody>${linksData.map(item => {
+    table.innerHTML = `<thead class="thead-light"><tr><th>Backlink URL</th><th>Status</th><th>Validation</th><th>Link Type</th><th>Anchor Text</th><th>Google Status</th><th>Ping-o-Matic</th><th>Short URL</th></tr></thead><tbody>${linksData.map(item => {
         let displayUrl = item.url; try { displayUrl = decodeURIComponent(item.url); } catch (e) {}
         const truncatedUrl = displayUrl.length > 50 ? `${displayUrl.substring(0, 47)}...` : displayUrl;
         const statusClass = item.live ? 'text-success' : 'text-danger';
@@ -259,7 +259,8 @@ function generateSummaryReport(linksData = [], targetDomain = '') {
                     <td class="text-center">${item.validation || '⚪'}</td>
                     <td class="text-center">${linkTypeBadge}</td>
                     <td title="${item.anchorText || 'N/A'}">${truncatedAnchor}</td>
-                    <td class="text-center">${item.google || '⚪'}</td> 
+                    <td class="text-center">${item.google || '⚪'}</td>
+                    <td class="text-center">${item.pingomatic || '⚪'}</td>
                     <td>${item.shortlink && item.shortlink.startsWith('http') ? `<a href="${item.shortlink}" target="_blank" rel="noopener noreferrer">${item.shortlink}</a>` : (item.shortlink || '⚪')}</td>
                 </tr>`;
     }).join('')}</tbody>`;
@@ -472,7 +473,7 @@ function exportCampaignToCSV() {
 
     const headers = [
         "Backlink URL", "Status", "Validation", "Link Type", "Anchor Text", 
-        "Page Title", "Google Status", "Short URL", "Last Checked"
+        "Page Title", "Google Status", "Ping-o-Matic", "Short URL", "Last Checked"
     ];
     
     const rows = campaign.links.map(link => [
@@ -483,6 +484,7 @@ function exportCampaignToCSV() {
         sanitizeCell(link.anchorText),
         sanitizeCell(link.pageTitle),
         sanitizeCell(link.google),
+        sanitizeCell(link.pingomatic),
         sanitizeCell(link.shortlink),
         sanitizeCell(link.lastChecked ? new Date(link.lastChecked).toLocaleString() : 'N/A')
     ].join(','));
